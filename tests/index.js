@@ -175,10 +175,38 @@ describe('broccoli-filter', function(){
         });
     });
 
-    it('is not called if an existing file is modified but the content stays the same', function(){
+    it('is called if an existing file is modified but the content stays the same', function(){
       var processStringCount = 0;
       var tree = runAnonFilter(sourcePath, {
         extensions: ['js']
+      }, {
+        processString: function(content, relativePath) {
+          processStringCount++;
+          return content;
+        }
+      })
+
+      builder = new broccoli.Builder(tree);
+
+      return builder.build()
+        .finally(function() {
+          expect(processStringCount).to.eql(1);
+        })
+        .then(function() {
+          fs.writeFileSync(existingJSFile, fs.readFileSync(existingJSFile));
+
+          return builder.build()
+        })
+        .finally(function() {
+          expect(processStringCount).to.eql(2);
+        });
+    });
+
+    it('is not called if an existing file is modified but the content stays the same when cacheByContent is enabled', function(){
+      var processStringCount = 0;
+      var tree = runAnonFilter(sourcePath, {
+        extensions: ['js'],
+        cacheByContent: true
       }, {
         processString: function(content, relativePath) {
           processStringCount++;
@@ -264,7 +292,7 @@ describe('broccoli-filter', function(){
     });
   });
 
-  // describe('other', function() {
+  describe('other', function() {
     it('can write files to destDir, and they will be in the final output', function(){
       var tree = runAnonFilter(sourcePath, {
         extensions: ['js']
@@ -299,5 +327,5 @@ describe('broccoli-filter', function(){
         expect(thenCalled).to.be.ok();
       });
     });
-  // });
+  });
 });

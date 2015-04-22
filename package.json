@@ -1,7 +1,7 @@
 {
   "name": "broccoli-filter",
   "description": "Helper base class for Broccoli plugins that map input files into output files one-to-one",
-  "version": "0.1.6",
+  "version": "0.1.12",
   "author": "Jo Liss <joliss42@gmail.com>",
   "main": "index.js",
   "license": "MIT",
@@ -15,17 +15,21 @@
     "cache"
   ],
   "dependencies": {
-    "broccoli-kitchen-sink-helpers": "^0.2.0",
-    "broccoli-writer": "^0.1.1",
+    "broccoli-kitchen-sink-helpers": "git://github.com/timmfin/broccoli-kitchen-sink-helpers.git#hash-key-by-file-content",
     "mkdirp": "^0.3.5",
-    "promise-map-series": "^0.2.0",
-    "quick-temp": "^0.1.0",
-    "rsvp": "^3.0.3",
+    "promise-map-series": "^0.2.1",
+    "quick-temp": "^0.1.2",
+    "rsvp": "^3.0.16",
     "symlink-or-copy": "^1.0.0",
     "walk-sync": "^0.1.3"
   },
+  "scripts": {
+    "test": "mocha tests/",
+    "test:watch": "mocha --watch tests/",
+    "test:debug": "mocha debug tests/"
+  },
   "devDependencies": {
-    "broccoli": "^0.13.0",
+    "broccoli": "^0.16.0",
     "expect.js": "^0.3.1",
     "mocha": "^1.21.4"
   }
