@@ -3,7 +3,6 @@ var path = require('path')
 var mkdirp = require('mkdirp')
 var Promise = require('rsvp').Promise
 var quickTemp = require('quick-temp')
-var Writer = require('broccoli-writer')
 var helpers = require('broccoli-kitchen-sink-helpers')
 var walkSync = require('walk-sync')
 var mapSeries = require('promise-map-series')
@@ -11,45 +10,60 @@ var symlinkOrCopySync = require('symlink-or-copy').sync
 
 
 module.exports = Filter
-Filter.prototype = Object.create(Writer.prototype)
-Filter.prototype.constructor = Filter
 function Filter (inputTree, options) {
+  if (!inputTree) {
+    throw new Error('broccoli-filter must be passed an inputTree, instead it received `undefined`');
+  }
   this.inputTree = inputTree
   options = options || {}
   if (options.extensions != null) this.extensions = options.extensions
   if (options.targetExtension != null) this.targetExtension = options.targetExtension
-  // We could allow for overwriting this.getDestFilePath as well; just need an
-  // option name that communicates the meaning
-  // We could allow for setting the encoding to something other than utf8
+  if (options.inputEncoding !== undefined) this.inputEncoding = options.inputEncoding
+  if (options.outputEncoding !== undefined) this.outputEncoding = options.outputEncoding
 }
 
-Filter.prototype.getCacheDir = function () {
-  return quickTemp.makeOrReuse(this, 'tmpCacheDir')
-}
-
-Filter.prototype.write = function (readTree, destDir) {
+Filter.prototype.rebuild = function () {
   var self = this
 
-  return readTree(this.inputTree).then(function (srcDir) {
-    var paths = walkSync(srcDir)
-
+  var paths = walkSync(this.inputPath)
     return mapSeries(paths, function (relativePath) {
       if (relativePath.slice(-1) === '/') {
-        mkdirp.sync(destDir + '/' + relativePath)
+        mkdirp.sync(self.outputPath + '/' + relativePath)
       } else {
         if (self.canProcessFile(relativePath)) {
-          return self.processAndCacheFile(srcDir, destDir, relativePath)
+          return self.processAndCacheFile(self.inputPath, self.outputPath, relativePath)
         } else {
-          symlinkOrCopySync(srcDir + '/' + relativePath, destDir + '/' + relativePath)
+          symlinkOrCopySync(
+            self.inputPath + '/' + relativePath, self.outputPath + '/' + relativePath)
         }
       }
     })
-  })
+}
+
+// Compatibility with Broccoli < 0.14
+// See https://github.com/broccolijs/broccoli/blob/master/docs/new-rebuild-api.md
+Filter.prototype.read = function (readTree) {
+  var self = this
+
+  quickTemp.makeOrRemake(this, 'outputPath')
+  quickTemp.makeOrReuse(this, 'cachePath')
+  this.needsCleanup = true
+
+  return readTree(this.inputTree)
+    .then(function (inputPath) {
+      self.inputPath = inputPath
+      return self.rebuild()
+    })
+    .then(function () {
+      return self.outputPath
+    })
 }
 
 Filter.prototype.cleanup = function () {
-  quickTemp.remove(this, 'tmpCacheDir')
-  Writer.prototype.cleanup.call(this)
+  if (this.needsCleanup) {
+    quickTemp.remove(this, 'outputPath')
+    quickTemp.remove(this, 'cachePath')
+  }
 }
 
 Filter.prototype.canProcessFile = function (relativePath) {
@@ -69,6 +83,9 @@ Filter.prototype.getDestFilePath = function (relativePath) {
   return null
 }
 
+// To do: Get rid of the srcDir/destDir args because we now have inputPath/outputPath
+// https://github.com/search?q=processAndCacheFile&type=Code&utf8=%E2%9C%93
+
 Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) {
   var self = this
 
@@ -84,8 +101,11 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
       })
       .catch(function (err) {
         // Augment for helpful error reporting
-        err.file = relativePath
-        err.treeDir = srcDir
+        err.broccoliInfo = err.broccoliInfo || {}
+        err.broccoliInfo.file = path.join(srcDir, relativePath)
+        // Compatibility
+        if (err.line != null) err.broccoliInfo.firstLine = err.line
+        if (err.column != null) err.broccoliInfo.firstColumn = err.column
         throw err
       })
       .then(function (cacheInfo) {
@@ -106,7 +126,8 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
       // We may be able to link as an optimization here, because we control
       // the cache directory; we need to be 100% sure though that we don't try
       // to hardlink symlinks, as that can lead to directory hardlinks on OS X
-      symlinkOrCopySync(self.getCacheDir() + '/' + cacheEntry.cacheFiles[i], dest)
+      symlinkOrCopySync(
+        self.cachePath + '/' + cacheEntry.cacheFiles[i], dest)
     }
   }
 
@@ -122,7 +143,7 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
 
       symlinkOrCopySync(
         destDir + '/' + cacheEntry.outputFiles[i],
-        self.getCacheDir() + '/' + cacheFile)
+        self.cachePath + '/' + cacheFile)
     }
     cacheEntry.hash = hash(cacheEntry.inputFiles)
     self._cache[relativePath] = cacheEntry
@@ -131,10 +152,12 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
 
 Filter.prototype.processFile = function (srcDir, destDir, relativePath) {
   var self = this
-  var string = fs.readFileSync(srcDir + '/' + relativePath, { encoding: 'utf8' })
+  var inputEncoding = (this.inputEncoding === undefined) ? 'utf8' : this.inputEncoding
+  var outputEncoding = (this.outputEncoding === undefined) ? 'utf8' : this.outputEncoding
+  var string = fs.readFileSync(srcDir + '/' + relativePath, { encoding: inputEncoding })
   return Promise.resolve(self.processString(string, relativePath))
     .then(function (outputString) {
       var outputPath = self.getDestFilePath(relativePath)
-      fs.writeFileSync(destDir + '/' + outputPath, outputString, { encoding: 'utf8' })
+      fs.writeFileSync(destDir + '/' + outputPath, outputString, { encoding: outputEncoding })
     })
 }
