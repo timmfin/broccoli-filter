@@ -20,6 +20,15 @@ function Filter (inputTree, options) {
   if (options.targetExtension != null) this.targetExtension = options.targetExtension
   if (options.inputEncoding !== undefined) this.inputEncoding = options.inputEncoding
   if (options.outputEncoding !== undefined) this.outputEncoding = options.outputEncoding
+  if (options.cacheByContent !== undefined) this.cacheByContent = options.cacheByContent
+
+  if (options.cacheByContent === true) {
+    this.cacheByContent = true
+
+    // First-level mtime cache checked first before content digest. This prevents
+    // unnecessary file reads when a file hasn't changed.
+    this._fileDigestCache = {}
+  }
 }
 
 Filter.prototype.rebuild = function () {
@@ -93,7 +102,7 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
   this._cache = this._cache || {}
   this._cacheIndex = this._cacheIndex || 0
   var cacheEntry = this._cache[relativePath]
-  if (cacheEntry != null && cacheEntry.hash === hash(cacheEntry.inputFiles)) {
+  if (cacheEntry != null && cacheEntry.hash === hash(cacheEntry.inputFiles, self.cacheByContent, self._fileDigestCache)) {
     symlinkOrCopyFromCache(cacheEntry)
   } else {
     return Promise.resolve()
@@ -114,9 +123,18 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
       })
   }
 
-  function hash (filePaths) {
+  function hash (filePaths, cacheByContent, digestCache) {
+    var hashOptions;
+
+    if (cacheByContent) {
+      hashOptions = {
+        digestCache: digestCache,
+        hashContent: true
+      }
+    }
+
     return filePaths.map(function (filePath) {
-      return helpers.hashTree(srcDir + '/' + filePath)
+      return helpers.hashTree(srcDir + '/' + filePath, hashOptions)
     }).join(',')
   }
 
@@ -146,7 +164,7 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
         self.cachePath + '/' + cacheEntry.outputFiles[i],
         self.outputPath + '/' + cacheEntry.outputFiles[i])
     }
-    cacheEntry.hash = hash(cacheEntry.inputFiles)
+    cacheEntry.hash = hash(cacheEntry.inputFiles, self.cacheByContent, self._fileDigestCache)
     self._cache[relativePath] = cacheEntry
   }
 }

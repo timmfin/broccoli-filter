@@ -202,6 +202,34 @@ describe('broccoli-filter', function(){
         });
     });
 
+    it('is not called if an existing file is modified but the content stays the same when cacheByContent is enabled', function(){
+      var processStringCount = 0;
+      var tree = runAnonFilter(sourcePath, {
+        extensions: ['js'],
+        cacheByContent: true
+      }, {
+        processString: function(content, relativePath) {
+          processStringCount++;
+          return content;
+        }
+      })
+
+      builder = new broccoli.Builder(tree);
+
+      return builder.build()
+        .finally(function() {
+          expect(processStringCount).to.eql(1);
+        })
+        .then(function() {
+          fs.writeFileSync(existingJSFile, fs.readFileSync(existingJSFile));
+
+          return builder.build()
+        })
+        .finally(function() {
+          expect(processStringCount).to.eql(1);
+        });
+    });
+
     it('is not called if input is changed but filtered (via getDestFilePath)', function(){
       var processStringCount = 0;
       var tree = runAnonFilter(sourcePath, {
