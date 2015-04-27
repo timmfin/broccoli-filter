@@ -15,7 +15,7 @@
     "cache"
   ],
   "dependencies": {
-    "broccoli-kitchen-sink-helpers": "git://github.com/timmfin/broccoli-kitchen-sink-helpers.git#hash-key-by-file-content",
+    "broccoli-kitchen-sink-helpers": "timmfin/broccoli-kitchen-sink-helpers#hash-key-by-file-content",
     "mkdirp": "^0.3.5",
     "promise-map-series": "^0.2.1",
     "quick-temp": "^0.1.2",
