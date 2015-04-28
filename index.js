@@ -101,7 +101,7 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
   this._cache = this._cache || {}
   this._cacheIndex = this._cacheIndex || 0
   var cacheEntry = this._cache[relativePath]
-  if (cacheEntry != null && cacheEntry.hash === hash(cacheEntry.inputFiles, self.cacheByContent, self._fileDigestCache)) {
+  if (cacheEntry != null && cacheEntry.hash === self.hashEntry(srcDir, destDir, cacheEntry)) {
     symlinkOrCopyFromCache(cacheEntry)
   } else {
     return Promise.resolve()
@@ -120,21 +120,6 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
       .then(function (cacheInfo) {
         symlinkOrCopyToOutput(cacheInfo, destDir)
       })
-  }
-
-  function hash (filePaths, cacheByContent, digestCache) {
-    var hashOptions;
-
-    if (cacheByContent) {
-      hashOptions = {
-        digestCache: digestCache,
-        hashContent: true
-      }
-    }
-
-    return filePaths.map(function (filePath) {
-      return helpers.hashTree(srcDir + '/' + filePath, hashOptions)
-    }).join(',')
   }
 
   function symlinkOrCopyFromCache (cacheEntry) {
@@ -163,9 +148,24 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
         self.cachePath + '/' + cacheEntry.outputFiles[i],
         self.outputPath + '/' + cacheEntry.outputFiles[i])
     }
-    cacheEntry.hash = hash(cacheEntry.inputFiles, self.cacheByContent, self._fileDigestCache)
+    cacheEntry.hash = self.hashEntry(srcDir, destDir, cacheEntry)
     self._cache[relativePath] = cacheEntry
   }
+}
+
+Filter.prototype.hashEntry = function(srcDir, destDir, cacheEntry) {
+  var hashOptions;
+
+  if (this.cacheByContent) {
+    hashOptions = {
+      digestCache: this._fileDigestCache,
+      hashContent: true
+    }
+  }
+
+  return cacheEntry.inputFiles.map(function (filePath) {
+    return helpers.hashTree(srcDir + '/' + filePath, hashOptions)
+  }).join(',')
 }
 
 Filter.prototype.processFile = function (srcDir, destDir, relativePath) {
