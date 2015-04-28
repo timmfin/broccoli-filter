@@ -292,6 +292,87 @@ describe('broccoli-filter', function(){
     });
   });
 
+  describe('hashing', function() {
+    it('can override the hash function', function(){
+      var hashEntryCalled = false;
+      var tree = runAnonFilter(sourcePath, {
+        extensions: ['js'],
+        targetExtension: 'bestjs'
+      }, {
+        processString: function(content, relativePath) {
+          return content;
+        },
+
+        hashEntry: function(srcDir, destDir, cacheEntry) {
+          hashEntryCalled = true;
+
+          expect(srcDir).to.be.equal(sourcePath);
+          expect(destDir).to.be.ok();
+          expect(cacheEntry.inputFiles).to.eql([ 'sub-folder/core.js' ]);
+          expect(cacheEntry.outputFiles).to.eql([ 'sub-folder/core.bestjs' ]);
+
+          return Filter.prototype.hashEntry.call(this, srcDir, destDir, cacheEntry);
+        }
+      });
+
+      builder = new broccoli.Builder(tree);
+      return builder.build().finally(function() {
+        expect(hashEntryCalled).to.be.ok();
+      });
+    });
+
+    it('custom hash function can force re-process', function(){
+      var processStringCtr = 0;
+      var buildCtr = 1;
+      var tree = runAnonFilter(sourcePath, {
+        extensions: ['js']
+      }, {
+        processString: function(content, relativePath) {
+          processStringCtr++;
+          return content;
+        },
+
+        hashEntry: function(srcDir, destDir, cacheEntry) {
+          // Only change the hash every other build
+          var hash = 'some-hash-';
+
+          if ((buildCtr % 2) === 1) {
+            hash += buildCtr;
+          } else {
+            hash += buildCtr - 1;
+          }
+
+          return hash;
+        }
+      });
+
+      builder = new broccoli.Builder(tree);
+      return builder.build().finally(function() {
+        expect(processStringCtr).to.be.eql(1);
+
+        buildCtr++;
+        return builder.build().finally(function() {
+          expect(processStringCtr).to.be.eql(1);
+
+          buildCtr++;
+          return builder.build().finally(function() {
+            expect(processStringCtr).to.be.eql(2);
+
+            buildCtr++;
+            return builder.build().finally(function() {
+              expect(processStringCtr).to.be.eql(2);
+
+              buildCtr++;
+              return builder.build().finally(function() {
+                expect(processStringCtr).to.be.eql(3);
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+
   describe('other', function() {
     it('can write files to destDir, and they will be in the final output', function(){
       var tree = runAnonFilter(sourcePath, {
