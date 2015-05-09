@@ -91,7 +91,7 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
         throw err
       })
       .then(function (cacheInfo) {
-        copyToCache(cacheInfo)
+        self.copyToCache(relativePath, cacheInfo)
       })
   }
 
@@ -108,24 +108,24 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
       symlinkOrCopySync(self.getCacheDir() + '/' + cacheEntry.cacheFiles[i], dest)
     }
   }
+}
 
-  function copyToCache (cacheInfo) {
-    var cacheEntry = {
-      inputFiles: (cacheInfo || {}).inputFiles || [relativePath],
-      outputFiles: (cacheInfo || {}).outputFiles || [self.getDestFilePath(relativePath)],
-      cacheFiles: []
-    }
-    for (var i = 0; i < cacheEntry.outputFiles.length; i++) {
-      var cacheFile = (self._cacheIndex++) + ''
-      cacheEntry.cacheFiles.push(cacheFile)
-
-      helpers.copyPreserveSync(
-        destDir + '/' + cacheEntry.outputFiles[i],
-        self.getCacheDir() + '/' + cacheFile)
-    }
-    cacheEntry.hash = hash(cacheEntry.inputFiles)
-    self._cache[relativePath] = cacheEntry
+Filter.prototype.copyToCache = function (relativePath, cacheInfo) {
+  var cacheEntry = {
+    inputFiles: (cacheInfo || {}).inputFiles || [relativePath],
+    outputFiles: (cacheInfo || {}).outputFiles || [self.getDestFilePath(relativePath)],
+    cacheFiles: []
   }
+  for (var i = 0; i < cacheEntry.outputFiles.length; i++) {
+    var cacheFile = (self._cacheIndex++) + ''
+    cacheEntry.cacheFiles.push(cacheFile)
+
+    helpers.copyPreserveSync(
+      destDir + '/' + cacheEntry.outputFiles[i],
+      self.getCacheDir() + '/' + cacheFile)
+  }
+  cacheEntry.hash = hash(cacheEntry.inputFiles)
+  self._cache[relativePath] = cacheEntry
 }
 
 Filter.prototype.processFile = function (srcDir, destDir, relativePath) {
@@ -135,8 +135,12 @@ Filter.prototype.processFile = function (srcDir, destDir, relativePath) {
   var string = fs.readFileSync(srcDir + '/' + relativePath, { encoding: inputEncoding })
   return Promise.resolve(self.processString(string, relativePath))
     .then(function (outputString) {
-      var outputPath = self.getDestFilePath(relativePath)
-      fs.writeFileSync(destDir + '/' + outputPath, outputString, { encoding: outputEncoding })
+      if (outputString !== string) {
+        var outputPath = self.getDestFilePath(relativePath)
+        fs.writeFileSync(destDir + '/' + outputPath, outputString, { encoding: outputEncoding })
+      } else {
+        self.copyToCache(relativePath, undefined);
+      }
     })
 }
 
