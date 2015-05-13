@@ -24,12 +24,13 @@ function Filter (inputTree, options) {
 
   if (options.cacheByContent === true) {
     this.cacheByContent = true
+  }
+
+  // First-level mtime cache checked first before content digest. This prevents
+  // unnecessary file reads when a file hasn't changed.
+  this._fileDigestCache = {}
 }
 
-    // First-level mtime cache checked first before content digest. This prevents
-    // unnecessary file reads when a file hasn't changed.
-    this._fileDigestCache = {}
-  }
 Filter.prototype.rebuild = function () {
   var self = this
 
