@@ -240,7 +240,7 @@ Filter.prototype.persistCacheDir = function() {
   }
 }
 
-Filter.protoype.initializePersistentCache = function() {
+Filter.prototype.initializePersistentCache = function() {
   // TODO, only require a persistedCacheId if there is more than one instance of this filter?
   if (!options.persistedCacheId) {
     throw new Error('Subclasses of broccoli-persisted-filter must be passed a persistedCacheId to be able to uniquely identify themselves');
