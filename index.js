@@ -1,5 +1,6 @@
 var fs = require('fs')
 var path = require('path')
+var rimraf = require('rimraf').sync
 var mkdirp = require('mkdirp')
 var Promise = require('rsvp').Promise
 var quickTemp = require('quick-temp')
@@ -7,7 +8,10 @@ var helpers = require('broccoli-kitchen-sink-helpers')
 var walkSync = require('walk-sync')
 var mapSeries = require('promise-map-series')
 var symlinkOrCopySync = require('symlink-or-copy').sync
+var copyDereferenceSync = require('copy-dereference').sync
+var findBaseTempDir = require('./find-base-temp-dir.js')
 
+var globalBroccoliFilterCounter = 0;
 
 module.exports = Filter
 function Filter (inputTree, options) {
@@ -29,6 +33,26 @@ function Filter (inputTree, options) {
   // First-level mtime cache checked first before content digest. This prevents
   // unnecessary file reads when a file hasn't changed.
   this._fileDigestCache = {}
+
+  if (!options.persistedCacheId) {
+    throw new Error('Subclasses of broccoli-persisted-filter must be passed a persistedCacheId to be able to uniquely identify themselves');
+  }
+
+  this.instanceNum = globalBroccoliFilterCounter++
+
+  var persistedCacheDirname = 'persisted-' + options.persistedCacheId + '-cache'
+  this.persistedCachePath = findBaseTempDir() + '/' + persistedCacheDirname
+  this.persistedCacheManifest = this.persistedCachePath + '/persisted-cache.json';
+
+  try {
+    if (fs.statSync(this.persistedCacheManifest).isFile()) {
+      this._persistedCache = JSON.parse(fs.readFileSync(this.persistedCacheManifest));
+    }
+  } catch (e) {
+    if (e.code != 'ENOENT') {
+      throw e;
+    }
+  }
 }
 
 Filter.prototype.rebuild = function () {
@@ -70,9 +94,50 @@ Filter.prototype.read = function (readTree) {
 }
 
 Filter.prototype.cleanup = function () {
+  if (this.cachePath) {
+    this.persistCacheDir();
+  }
+
   if (this.needsCleanup) {
     quickTemp.remove(this, 'outputPath')
     quickTemp.remove(this, 'cachePath')
+  } else {
+    console.log('Not cleaning up (new)', this.cachePath)
+  }
+}
+
+
+Filter.prototype.persistCacheDir = function() {
+  if (this._cache && Object.keys(this._cache).length > 0) {
+    mkdirp.sync(this.persistedCachePath)
+    this._persistedCache = this._persistedCache || {};
+
+    console.log("Merging: ", this._cache, "\nwith:", this._persistedCache);
+
+    // Merge files from memory cache to persisted cache
+    for (var relativePath in this._cache) {
+      if (this._cache.hasOwnProperty(relativePath)) {
+        var cacheEntry =  this._cache[relativePath],
+            persistedCacheEntry = this._persistedCache[relativePath],
+            outputFiles = cacheEntry.outputFiles;
+
+        // Only copy files to the persisted folder if they are different
+        if (!persistedCacheEntry || cacheEntry.hash != persistedCacheEntry.hash) {
+
+          for (var i = 0; i < outputFiles.length; i++) {
+            if (persistedCacheEntry) {
+              rimraf(this.persistedCachePath + '/' + outputFiles[i]);
+            }
+
+            mkdirp.sync(path.dirname(this.persistedCachePath + '/' + outputFiles[i]))
+            copyDereferenceSync(this.cachePath + '/' + outputFiles[i], this.persistedCachePath + '/' + outputFiles[i]);
+          }
+
+          this._persistedCache[relativePath] = this._cache[relativePath];
+        }
+      }
+    }
+    fs.writeFileSync(this.persistedCacheManifest, JSON.stringify(this._persistedCache, null, 2));
   }
 }
 
@@ -100,10 +165,13 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
   var self = this
 
   this._cache = this._cache || {}
-  this._cacheIndex = this._cacheIndex || 0
   var cacheEntry = this._cache[relativePath]
+  var persistedCacheEntry = this._persistedCache && this._persistedCache[relativePath]
+
   if (cacheEntry != null && cacheEntry.hash === self.hashEntry(srcDir, destDir, cacheEntry)) {
-    symlinkOrCopyFromCache(cacheEntry)
+    symlinkOrCopyFromCache(cacheEntry, self.cachePath)
+  } else if (persistedCacheEntry != null && persistedCacheEntry.hash === self.hashEntry(srcDir, destDir, persistedCacheEntry)) {
+    symlinkOrCopyFromCache(persistedCacheEntry, self.persistedCachePath)
   } else {
     return Promise.resolve()
       .then(function () {
@@ -123,7 +191,7 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
       })
   }
 
-  function symlinkOrCopyFromCache (cacheEntry) {
+  function symlinkOrCopyFromCache (cacheEntry, cachePath) {
     for (var i = 0; i < cacheEntry.outputFiles.length; i++) {
       var cachedRelativePath = cacheEntry.outputFiles[i]
       var dest = destDir + '/' + cachedRelativePath
@@ -133,7 +201,7 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
       // the cache directory; we need to be 100% sure though that we don't try
       // to hardlink symlinks, as that can lead to directory hardlinks on OS X
       symlinkOrCopySync(
-        self.cachePath + '/' + cachedRelativePath, dest)
+        cachePath + '/' + cachedRelativePath, dest)
     }
   }
 
@@ -142,9 +210,8 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
       inputFiles: (cacheInfo || {}).inputFiles || [relativePath],
       outputFiles: (cacheInfo || {}).outputFiles || [self.getDestFilePath(relativePath)]
     }
-    for (var i = 0; i < cacheEntry.outputFiles.length; i++) {
-      var cacheFile = (self._cacheIndex++) + ''
 
+    for (var i = 0; i < cacheEntry.outputFiles.length; i++) {
       symlinkOrCopySync(
         self.cachePath + '/' + cacheEntry.outputFiles[i],
         self.outputPath + '/' + cacheEntry.outputFiles[i])

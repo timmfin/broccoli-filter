@@ -16,9 +16,11 @@
   ],
   "dependencies": {
     "broccoli-kitchen-sink-helpers": "timmfin/broccoli-kitchen-sink-helpers#hash-key-by-file-content",
+    "copy-dereference": "^1.0.0",
     "mkdirp": "^0.3.5",
     "promise-map-series": "^0.2.1",
     "quick-temp": "^0.1.2",
+    "rimraf": "^2.3.3",
     "rsvp": "^3.0.16",
     "symlink-or-copy": "^1.0.0",
     "walk-sync": "^0.1.3"
