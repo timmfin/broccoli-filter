@@ -11,8 +11,6 @@ var symlinkOrCopySync = require('symlink-or-copy').sync
 var copyDereferenceSync = require('copy-dereference').sync
 var findBaseTempDir = require('./find-base-temp-dir.js')
 
-var globalBroccoliFilterCounter = 0;
-
 module.exports = Filter
 function Filter (inputTree, options) {
   if (!inputTree) {
@@ -34,25 +32,7 @@ function Filter (inputTree, options) {
   // unnecessary file reads when a file hasn't changed.
   this._fileDigestCache = {}
 
-  if (!options.persistedCacheId) {
-    throw new Error('Subclasses of broccoli-persisted-filter must be passed a persistedCacheId to be able to uniquely identify themselves');
-  }
-
-  this.instanceNum = globalBroccoliFilterCounter++
-
-  var persistedCacheDirname = 'persisted-' + options.persistedCacheId + '-cache'
-  this.persistedCachePath = findBaseTempDir() + '/' + persistedCacheDirname
-  this.persistedCacheManifest = this.persistedCachePath + '/persisted-cache.json';
-
-  try {
-    if (fs.statSync(this.persistedCacheManifest).isFile()) {
-      this._persistedCache = JSON.parse(fs.readFileSync(this.persistedCacheManifest));
-    }
-  } catch (e) {
-    if (e.code != 'ENOENT') {
-      throw e;
-    }
-  }
+  this.initializePersistentCache()
 }
 
 Filter.prototype.rebuild = function () {
@@ -94,50 +74,17 @@ Filter.prototype.read = function (readTree) {
 }
 
 Filter.prototype.cleanup = function () {
-  if (this.cachePath) {
-    this.persistCacheDir();
-  }
+  // Persist the in-memory cache to disk if needed. Note, relies on the broccoli core
+  // change to call cleanup in _reverse_ tree order (so that leaf trees are cleaned
+  // up before their parents). Otherwise, symlinks would already be broken before
+  // we had the chance to copyDereferenceSync them.
+  //
+  // (https://github.com/broccolijs/broccoli/compare/c88fa2963bf93fbbb74e521916f06c8b34514678...timmfin:tweak-cleanup-for-persistent-filters-spike)
+  this.persistCacheDir();
 
   if (this.needsCleanup) {
     quickTemp.remove(this, 'outputPath')
     quickTemp.remove(this, 'cachePath')
-  } else {
-    console.log('Not cleaning up (new)', this.cachePath)
-  }
-}
-
-
-Filter.prototype.persistCacheDir = function() {
-  if (this._cache && Object.keys(this._cache).length > 0) {
-    mkdirp.sync(this.persistedCachePath)
-    this._persistedCache = this._persistedCache || {};
-
-    console.log("Merging: ", this._cache, "\nwith:", this._persistedCache);
-
-    // Merge files from memory cache to persisted cache
-    for (var relativePath in this._cache) {
-      if (this._cache.hasOwnProperty(relativePath)) {
-        var cacheEntry =  this._cache[relativePath],
-            persistedCacheEntry = this._persistedCache[relativePath],
-            outputFiles = cacheEntry.outputFiles;
-
-        // Only copy files to the persisted folder if they are different
-        if (!persistedCacheEntry || cacheEntry.hash != persistedCacheEntry.hash) {
-
-          for (var i = 0; i < outputFiles.length; i++) {
-            if (persistedCacheEntry) {
-              rimraf(this.persistedCachePath + '/' + outputFiles[i]);
-            }
-
-            mkdirp.sync(path.dirname(this.persistedCachePath + '/' + outputFiles[i]))
-            copyDereferenceSync(this.cachePath + '/' + outputFiles[i], this.persistedCachePath + '/' + outputFiles[i]);
-          }
-
-          this._persistedCache[relativePath] = this._cache[relativePath];
-        }
-      }
-    }
-    fs.writeFileSync(this.persistedCacheManifest, JSON.stringify(this._persistedCache, null, 2));
   }
 }
 
@@ -167,6 +114,10 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
   this._cache = this._cache || {}
   var cacheEntry = this._cache[relativePath]
   var persistedCacheEntry = this._persistedCache && this._persistedCache[relativePath]
+
+  // First look in the in-memory cache and then look in the persistent cache on disk
+  // (later during cleanup, the in-memory cache will be merged with the persistent
+  // cache on the filesystem)
 
   if (cacheEntry != null && cacheEntry.hash === self.hashEntry(srcDir, destDir, cacheEntry)) {
     symlinkOrCopyFromCache(cacheEntry, self.cachePath)
@@ -246,4 +197,67 @@ Filter.prototype.processFile = function (srcDir, destDir, relativePath) {
       var outputPath = self.getDestFilePath(relativePath)
       fs.writeFileSync(destDir + '/' + outputPath, outputString, { encoding: outputEncoding })
     })
+}
+
+Filter.prototype.persistCacheDir = function() {
+  // No need to persist any (new) cache info if the in-memory cache is empty
+  if (this.cachePath && this._cache && Object.keys(this._cache).length > 0) {
+
+    mkdirp.sync(this.persistedCachePath)
+    this._persistedCache = this._persistedCache || {};
+
+    // console.log("Merging: ", this._cache, "\nwith:", this._persistedCache);
+
+    // Merge files from memory cache to persisted cache
+    for (var relativePath in this._cache) {
+      if (this._cache.hasOwnProperty(relativePath)) {
+        var cacheEntry =  this._cache[relativePath],
+            persistedCacheEntry = this._persistedCache[relativePath],
+            outputFiles = cacheEntry.outputFiles;
+
+        // Only copy files to the persisted folder if they are different
+        if (!persistedCacheEntry || cacheEntry.hash != persistedCacheEntry.hash) {
+
+          for (var i = 0; i < outputFiles.length; i++) {
+            if (persistedCacheEntry) {
+              rimraf(this.persistedCachePath + '/' + outputFiles[i]);
+            }
+
+            mkdirp.sync(path.dirname(this.persistedCachePath + '/' + outputFiles[i]))
+
+            // Copy actual files to disk, and not symlinks to prevent them from getting
+            // broken in the future
+            copyDereferenceSync(this.cachePath + '/' + outputFiles[i], this.persistedCachePath + '/' + outputFiles[i]);
+          }
+
+          this._persistedCache[relativePath] = this._cache[relativePath];
+        }
+      }
+    }
+
+    // Save the cache manifest so it can be loaded next invocation
+    fs.writeFileSync(this.persistedCacheManifest, this._persistedCache);
+  }
+}
+
+Filter.protoype.initializePersistentCache = function() {
+  // TODO, only require a persistedCacheId if there is more than one instance of this filter?
+  if (!options.persistedCacheId) {
+    throw new Error('Subclasses of broccoli-persisted-filter must be passed a persistedCacheId to be able to uniquely identify themselves');
+  }
+
+  var persistedCacheDirname = 'persisted-' + options.persistedCacheId + '-cache'
+  this.persistedCachePath = findBaseTempDir() + '/' + persistedCacheDirname
+  this.persistedCacheManifest = this.persistedCachePath + '/persisted-cache.json';
+
+  // Load the cache manifest from disk if present
+  try {
+    if (fs.statSync(this.persistedCacheManifest).isFile()) {
+      this._persistedCache = JSON.parse(fs.readFileSync(this.persistedCacheManifest));
+    }
+  } catch (e) {
+    if (e.code != 'ENOENT') {
+      throw e;
+    }
+  }
 }
