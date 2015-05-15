@@ -32,7 +32,7 @@ function Filter (inputTree, options) {
   // unnecessary file reads when a file hasn't changed.
   this._fileDigestCache = {}
 
-  this.initializePersistentCache()
+  this.initializePersistentCache(options)
 }
 
 Filter.prototype.rebuild = function () {
@@ -236,11 +236,11 @@ Filter.prototype.persistCacheDir = function() {
     }
 
     // Save the cache manifest so it can be loaded next invocation
-    fs.writeFileSync(this.persistedCacheManifest, this._persistedCache);
+    fs.writeFileSync(this.persistedCacheManifest, JSON.stringify(this._persistedCache));
   }
 }
 
-Filter.prototype.initializePersistentCache = function() {
+Filter.prototype.initializePersistentCache = function(options) {
   // TODO, only require a persistedCacheId if there is more than one instance of this filter?
   if (!options.persistedCacheId) {
     throw new Error('Subclasses of broccoli-persisted-filter must be passed a persistedCacheId to be able to uniquely identify themselves');
