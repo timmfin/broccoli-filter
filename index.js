@@ -183,7 +183,7 @@ Filter.prototype.hashEntry = function(srcDir, destDir, cacheEntry) {
   }
 
   return cacheEntry.inputFiles.map(function (filePath) {
-    return helpers.hashTree(srcDir + '/' + filePath, hashOptions)
+    return helpers.hashFile(srcDir, filePath, hashOptions)
   }).join(',')
 }
 
