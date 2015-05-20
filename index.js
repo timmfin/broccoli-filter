@@ -1,4 +1,5 @@
 var fs = require('fs')
+var Set = require('Set')
 var path = require('path')
 var rimraf = require('rimraf').sync
 var mkdirp = require('mkdirp')
@@ -35,23 +36,80 @@ function Filter (inputTree, options) {
   this.initializePersistentCache(options)
 }
 
-Filter.prototype.rebuild = function () {
+Filter.prototype.rebuild = function() {
   var self = this
 
-  var paths = walkSync(this.inputPath)
-    return mapSeries(paths, function (relativePath) {
-      if (relativePath.slice(-1) === '/') {
-        mkdirp.sync(self.outputPath + '/' + relativePath)
-        mkdirp.sync(self.cachePath + '/' + relativePath)
-      } else {
-        if (self.canProcessFile(relativePath)) {
-          return self.processAndCacheFile(self.inputPath, self.outputPath, relativePath)
-        } else {
-          symlinkOrCopySync(
-            self.inputPath + '/' + relativePath, self.outputPath + '/' + relativePath)
-        }
+  var paths = walkSync(self.inputPath)
+  var filesToProcess = new Set()
+  var directoriesWithFilesToProcess = new Set()
+  var symlinkedDirectoriesAndChildren = new Set()
+
+  // Collect all files that need processing and directories that contain files to process
+  for (var i = 0; i < paths.length; i++) {
+    var relativePath = paths[i];
+
+    if (relativePath.slice(-1) !== '/' && self.canProcessFile(relativePath)) {
+      var dirname = path.dirname(relativePath) + '/'
+      filesToProcess.add(relativePath)
+
+      if (!directoriesWithFilesToProcess.has(dirname)) {
+        // Keep track of the directories we should _not_ be symlinking
+        directoriesWithFilesToProcess.add(dirname)
+
+        // And go ahead and create the parent dirs, since we'll need them later
+        mkdirp.sync(self.outputPath + '/' + dirname)
+        mkdirp.sync(self.cachePath + '/' + dirname)
       }
-    })
+    }
+  }
+
+  // Include ancestor directories with files to process as well
+  var directoriesToSplitUp = directoriesWithFilesToProcess.toArray()
+
+  for (var i = 0; i < directoriesToSplitUp.length; i++) {
+    var dir = directoriesToSplitUp[i];
+
+    for (var charIndex = 0; charIndex < dir.length; charIndex++) {
+      var char = dir[charIndex];
+      if (char === '/') {
+        var ancestor = dir.slice(0, charIndex + 1)   // include the '/'
+        directoriesWithFilesToProcess.add(ancestor)
+      }
+    }
+  }
+
+  // Finally iterate over all paths again, actually symlinking this time
+  for (var i = 0; i < paths.length; i++) {
+    var relativePath = paths[i];
+
+    if (directoriesWithFilesToProcess.has(relativePath) || filesToProcess.has(relativePath)) {
+      continue
+    }
+
+    var parentDir = path.dirname(relativePath) + '/'
+
+    if (relativePath.slice(-1) === '/') {
+
+      // Symlink entire directory unless parent already has been
+      if (!symlinkedDirectoriesAndChildren.has(parentDir)) {
+        pathMinusSlash = relativePath.slice(0, -1)
+        symlinkOrCopySync(self.inputPath + '/' + pathMinusSlash, self.outputPath + '/' + pathMinusSlash)
+        symlinkedDirectoriesAndChildren.add(relativePath)
+      } else {
+        // If a parent dir was already symlinked, we don't need to symlink again
+        // (and keep track to prevent further child directories from being symlinked)
+        symlinkedDirectoriesAndChildren.add(relativePath)
+      }
+
+    // Symlink file if it shouldn't be processed but shares a dir with a file that is processed
+    } else if (directoriesWithFilesToProcess.has(parentDir)) {
+      symlinkOrCopySync(self.inputPath + '/' + relativePath, self.outputPath + '/' + relativePath)
+    }
+  }
+
+  return mapSeries(filesToProcess.toArray(), function(relativePath) {
+    return self.processAndCacheFile(self.inputPath, self.outputPath, relativePath)
+  });
 }
 
 // Compatibility with Broccoli < 0.14
