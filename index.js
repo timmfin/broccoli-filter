@@ -87,6 +87,7 @@ Filter.prototype.rebuild = function() {
     }
 
     var parentDir = path.dirname(relativePath) + '/'
+    var atRootDir = parentDir === './'
 
     if (relativePath.slice(-1) === '/') {
 
@@ -102,7 +103,8 @@ Filter.prototype.rebuild = function() {
       }
 
     // Symlink file if it shouldn't be processed but shares a dir with a file that is processed
-    } else if (directoriesWithFilesToProcess.has(parentDir)) {
+    // (or is at the root, which can never be symlinked)
+    } else if (directoriesWithFilesToProcess.has(parentDir) || atRootDir) {
       symlinkOrCopySync(self.inputPath + '/' + relativePath, self.outputPath + '/' + relativePath)
     }
   }
