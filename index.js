@@ -33,7 +33,15 @@ function Filter (inputTree, options) {
   // unnecessary file reads when a file hasn't changed.
   this._fileDigestCache = {}
 
-  this.initializePersistentCache(options)
+  if (options.persist !== undefined) {
+    this.persist = options.persist;
+  } else {
+    this.persist = true;
+  }
+
+  if (this.persist === true) {
+    this.initializePersistentCache(options)
+  }
 }
 
 Filter.prototype.rebuild = function() {
@@ -173,7 +181,11 @@ Filter.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) 
 
   this._cache = this._cache || {}
   var cacheEntry = this._cache[relativePath]
-  var persistedCacheEntry = this._persistedCache && this._persistedCache[relativePath]
+  var persistedCacheEntry;
+
+  if (this.persist === true) {
+    persistedCacheEntry = this._persistedCache && this._persistedCache[relativePath]
+  }
 
   // First look in the in-memory cache and then look in the persistent cache on disk
   // (later during cleanup, the in-memory cache will be merged with the persistent
@@ -261,7 +273,7 @@ Filter.prototype.processFile = function (srcDir, destDir, relativePath) {
 
 Filter.prototype.persistCacheDir = function() {
   // No need to persist any (new) cache info if the in-memory cache is empty
-  if (this.cachePath && this._cache && Object.keys(this._cache).length > 0) {
+  if (this.persist === true && this.cachePath && this._cache && Object.keys(this._cache).length > 0) {
 
     mkdirp.sync(this.persistedCachePath)
     this._persistedCache = this._persistedCache || {};
